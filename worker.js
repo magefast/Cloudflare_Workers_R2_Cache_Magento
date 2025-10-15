@@ -70,6 +70,9 @@ export default {
             "CMS-Home"
         ];
 
+        var TYPE_FOR_CACHE_FILTER = [
+            "CategoryFilter"
+        ];
 
         try {
 
@@ -194,19 +197,35 @@ export default {
                         //console.log('HTML added: ' + r2cache.uploaded);
 
                         /**
-                         * Return not from CACHE
+                         * Return from CACHE
                          */
-                        const headers = new Headers();
-                        headers.set('CDN-Cached', 'Y');
-                        headers.set('CDN-Cache-Uploaded', r2cache.uploaded ?? '');
-
-                        let responseR2Cache = new Response(r2cache.body, {headers,});
-                        responseR2Cache.headers.set('Content-Encoding', 'gzip');
-
-                        console.log('From R2 CACHE');
-
-                        return responseR2Cache;
+                        return returnCachedR2(r2cache);
                     }
+
+
+                    /**
+                     * Check R2 cache for filter pages
+                     */
+                    r2cache = await env.R2filter.get(keyCache);
+                    if (r2cache !== null) {
+                        console.log('filter page cache - exist');
+                        /**
+                         * Return from CACHE
+                         */
+                        return returnCachedR2(r2cache);
+                    }
+
+                    /**
+                     * Redirect check KV storage
+                     */
+                    let urlWithoutParamsNormal = request.url.split("?")[0];
+                    const kvRerirectExistValue = await env.KV_REDIRECT.get(urlWithoutParamsNormal);
+                    if (kvRerirectExistValue !== null) {
+                        console.log('KV redirect exist');
+                        return Response.redirect(kvRerirectExistValue, 301);
+                    }
+
+
 
                     /**
                      * Try normal request
@@ -268,6 +287,7 @@ export default {
 
 
                             let canAddToCache = false;
+                            let canAddToCacheFilter = false;
 
 
                             if (TYPE_FOR_CACHE && TYPE_FOR_CACHE.length) {
@@ -283,14 +303,27 @@ export default {
                                 }
                             }
 
+
+                            if (canAddToCache === false && TYPE_FOR_CACHE_FILTER && TYPE_FOR_CACHE_FILTER.length) {
+                                let xTypeHeader = response1.headers.get('X-Type');
+
+                                console.log('X-Type:' + xTypeHeader);
+                                for (let type_page of TYPE_FOR_CACHE_FILTER) {
+                                    //console.log(type_page);
+                                    if (type_page === xTypeHeader) {
+                                        canAddToCacheFilter = true;
+                                        console.log('Need add to Cache Filter Page.');
+                                    }
+                                }
+                            }
+
+
+
+
                             if (canAddToCache === true) {
                                 const response2 = response1.clone();
 
                                 let html = await response2.text();
-                                html = html;
-
-                                //console.log(html);
-
 
                                 console.log(response1.headers.get('X-Type'));
 
@@ -309,7 +342,35 @@ export default {
 
                                 console.log('A - new content added to cache.');
 
+                                /**
+                                 * Return not from CACHE
+                                 */
+                                const headers = new Headers();
+                                headers.set('CDN-Cached', 'A');
 
+                                let response5 = new Response(response1.body, {headers,});
+
+                                return response5;
+                            } else if (canAddToCacheFilter === true) {
+
+
+                                const response2 = response1.clone();
+
+                                let html = await response2.text();
+
+                                keyCache = keyCache.toLowerCase();
+
+                                console.log(keyCache);
+
+                                /**
+                                 * Add to R2 Cache
+                                 */
+                                context.waitUntil(env.R2filter.put(keyCache, html, {
+                                    onlyIf: request.headers,
+                                    httpMetadata: request.headers
+                                }));
+
+                                console.log('A - new content added to cache filter page.');
 
                                 /**
                                  * Return not from CACHE
@@ -320,6 +381,8 @@ export default {
                                 let response5 = new Response(response1.body, {headers,});
 
                                 return response5;
+
+
                             } else {
                                 console.log('NOT Need add to Cache.');
                             }
@@ -331,6 +394,12 @@ export default {
 
                     if (redirectResponse === true) {
                         console.log('Redirect url: ' + redirectUrl);
+
+                        /**
+                         * Save to KV
+                         */
+                        await env.KV_REDIRECT.put(urlWithoutParams, redirectUrl);
+
                         let responseRedirect = await fetch(request);
                         return responseRedirect;
                     }
@@ -347,3 +416,19 @@ export default {
     },
 
 };
+
+function returnCachedR2(cachedata)
+{
+
+    const headers = new Headers();
+    headers.set('CDN-Cached', 'Y');
+    headers.set('CDN-Cache-Uploaded', cachedata.uploaded ?? '');
+
+    let responseR2Cache = new Response(cachedata.body, {headers,});
+    responseR2Cache.headers.set('Content-Encoding', 'gzip');
+
+    console.log('From R2 CACHE');
+
+    return responseR2Cache;
+}
+
