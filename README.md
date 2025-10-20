@@ -6,4 +6,7 @@ Idea based on Solution:
   - https://github.com/Genaker/CloudFlare_FPC_Worker
 
 
-    
+## Magento2 modules
+
+-  https://github.com/magefast/HeaderTypePage
+
