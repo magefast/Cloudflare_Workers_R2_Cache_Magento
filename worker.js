@@ -62,7 +62,6 @@ export default {
 
 
         var TYPE_FOR_CACHE = [
-            "ProductArchive",
             "ProductOutOfStock",
             "Product",
             "Category",
@@ -72,6 +71,10 @@ export default {
 
         var TYPE_FOR_CACHE_FILTER = [
             "CategoryFilter"
+        ];
+
+        var TYPE_FOR_CACHE_ARCHIVE = [
+            "ProductArchive"
         ];
 
         try {
@@ -169,14 +172,17 @@ export default {
 
                     let r2cache = null;
 
+                    r2cache = await env.R2.get(keyCache);
+
                     /**
                      * Search
                      */
+                    /*
                     const options = {
                         limit: 10,
                         prefix: keyCache,
                         include: [],
-                    };
+                      };
 
                     const listed = await env.R2.list(options);
 
@@ -185,9 +191,8 @@ export default {
                         console.log(listed.objects[0].key);
                         r2cache = await env.R2.get(listed.objects[0].key);
                     }
+                    */
 
-
-                    console.log(keyCache);
 
                     let r2cachetest = null;
 
@@ -224,6 +229,27 @@ export default {
                         console.log('KV redirect exist');
                         return Response.redirect(kvRerirectExistValue, 301);
                     }
+
+
+
+                    /**
+                     * Check R2 cache for Archive pages
+                     */
+                    let keyCacheArchive = keyCache + 'productarchive';
+                    r2cache = await env.R2archive.get(keyCacheArchive);
+                    if (r2cache !== null) {
+                        console.log('archive page cache - exist');
+                        /**
+                         * Return from CACHE
+                         */
+                        return returnCachedR2(r2cache);
+                    }
+
+
+
+
+
+
 
 
 
@@ -288,6 +314,7 @@ export default {
 
                             let canAddToCache = false;
                             let canAddToCacheFilter = false;
+                            let canAddToCacheArchive = false;
 
 
                             if (TYPE_FOR_CACHE && TYPE_FOR_CACHE.length) {
@@ -318,6 +345,22 @@ export default {
                             }
 
 
+                            if (canAddToCache === false && canAddToCacheFilter === false && TYPE_FOR_CACHE_ARCHIVE && TYPE_FOR_CACHE_ARCHIVE.length) {
+                                let xTypeHeader = response1.headers.get('X-Type');
+
+                                console.log('X-Type:' + xTypeHeader);
+                                for (let type_page of TYPE_FOR_CACHE_ARCHIVE) {
+                                    //console.log(type_page);
+                                    if (type_page === xTypeHeader) {
+                                        canAddToCacheArchive = true;
+                                        console.log('Need add to Cache Archive Page.');
+                                    }
+                                }
+                            }
+
+
+
+
                             if (canAddToCache === true) {
                                 const response2 = response1.clone();
 
@@ -325,7 +368,7 @@ export default {
 
                                 console.log(response1.headers.get('X-Type'));
 
-                                keyCache = keyCache + response1.headers.get('X-Type');
+                                //keyCache = keyCache + response1.headers.get('X-Type');
                                 keyCache = keyCache.toLowerCase();
 
                                 console.log(keyCache);
@@ -351,24 +394,14 @@ export default {
                                 return response5;
                             } else if (canAddToCacheFilter === true) {
 
-
                                 const response2 = response1.clone();
-
                                 let html = await response2.text();
-
-                                keyCache = keyCache.toLowerCase();
-
-                                console.log(keyCache);
 
                                 /**
                                  * Add to R2 Cache
                                  */
-                                context.waitUntil(env.R2filter.put(keyCache, html, {
-                                    onlyIf: request.headers,
-                                    httpMetadata: request.headers
-                                }));
-
-                                console.log('A - new content added to cache filter page.');
+                                console.log('Filter page to cache');
+                                addCache(context, env.R2filter, request, keyCache, html);
 
                                 /**
                                  * Return not from CACHE
@@ -380,6 +413,27 @@ export default {
 
                                 return response5;
 
+                            } else if (canAddToCacheArchive === true) {
+
+                                const response2 = response1.clone();
+                                let html = await response2.text();
+
+                                /**
+                                 * Add to R2 Cache
+                                 */
+                                console.log('Archive page to cache');
+                                keyCache = keyCache + 'productarchive';
+                                addCache(context, env.R2archive, request, keyCache, html);
+
+                                /**
+                                 * Return not from CACHE
+                                 */
+                                const headers = new Headers();
+                                headers.set('CDN-Cached', 'A');
+
+                                let response5 = new Response(response1.body, {headers,});
+
+                                return response5;
 
                             } else {
                                 console.log('NOT Need add to Cache.');
@@ -417,10 +471,13 @@ export default {
 
 function returnCachedR2(cachedata)
 {
-
     const headers = new Headers();
     headers.set('CDN-Cached', 'Y');
     headers.set('CDN-Cache-Uploaded', cachedata.uploaded ?? '');
+
+    headers.set('X-Frame-Options', 'SAMEORIGIN');
+    headers.set('Content-Type', 'text/html; charset=UTF-8');
+    headers.set('X-Content-Type-Options', 'nosniff');
 
     let responseR2Cache = new Response(cachedata.body, {headers,});
     responseR2Cache.headers.set('Content-Encoding', 'gzip');
@@ -428,4 +485,20 @@ function returnCachedR2(cachedata)
     console.log('From R2 CACHE');
 
     return responseR2Cache;
+}
+
+function addCache(context, r2, request, keyCache, html)
+{
+    keyCache = keyCache.toLowerCase();
+
+    /**
+     * Add to R2 Cache
+     */
+    context.waitUntil(r2.put(keyCache, html, {
+        onlyIf: request.headers,
+        httpMetadata: request.headers
+    }));
+
+    console.log('Added to cache page with key - ' + keyCache);
+
 }
